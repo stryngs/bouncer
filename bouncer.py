@@ -17,6 +17,7 @@ class Bouncer(object):
                  'interval',
                  'iteration',
                  'lastTime',
+                 'log',
                  'lfilter',
                  'pks',
                  'sh',
@@ -29,18 +30,29 @@ class Bouncer(object):
         self.lfilter = kwargs.get('LFILTER')
         self.interval = kwargs.get('interval')
         self.iteration = 1
+        self.log = kwargs.get('log')
         self.sh = kwargs.get('sh')
-        print('Opening events.log')
-        self.sh.wrt = open('events.log', 'a')
+
+        ## logging
+        if self.log is True:
+            print('Opening events.log')
+            self.sh.logging = True
+            self.sh.wrt = open('events.log', 'a')
+        else:
+            self.sh.logging = False
+
+        ## baseline
         if kwargs.get('baseline') is None:
             self.baseline = 1000
         else:
             self.baseline = int(kwargs.get('baseline'))
 
+        ## scapy preps
         self.FILTER = kwargs.get('FILTER')
         self.LFILTER = self.lFilter()
         self.PRN = self.pRn()
 
+        ## timers
         self.timer = time.time()
         self.lastTime = time.time()
 
@@ -58,7 +70,6 @@ class Bouncer(object):
         else:
             if self.FILTER is not None:
                 p = sniff(iface = self.interface, prn = self.PRN, filter = self.FILTER, store = 0)
-
             else:
                 p = sniff(iface = self.interface, prn = self.PRN, store = 0)
 
@@ -73,19 +84,19 @@ class Bouncer(object):
         """stdout and storage"""
         def snarf(pkt):
             capTime = time.time()
-            if pkt.haslayer('TCP'):
-                proto = 'TCP'
-                dpt = pkt[TCP].dport
-            elif pkt.haslayer('UDP'):
-                proto = 'UDP'
-                dpt = pkt[UDP].dport
-            else:
-                proto = 'UNK'
-                dpt = None
-            self.sh.wrt.write('{0}:{1}:{2}\n'.format(str(capTime), proto, str(dpt)))
+            if self.log is True:
+                if pkt.haslayer('TCP'):
+                    proto = 'TCP'
+                    dpt = pkt[TCP].dport
+                elif pkt.haslayer('UDP'):
+                    proto = 'UDP'
+                    dpt = pkt[UDP].dport
+                else:
+                    proto = 'UNK'
+                    dpt = None
+                self.sh.wrt.write('{0}:{1}:{2}\n'.format(str(capTime), proto, str(dpt)))
 
             if self.count % self.baseline == 0:
-
                 timeDelta = capTime - self.lastTime
                 self.pks = (self.baseline / timeDelta)
                 self.lastTime = time.time()
@@ -102,18 +113,20 @@ class Shared(object):
 def crtlC(sh):
     """Handle CTRL+C."""
     def tmp(signal, frame):
-        print('\nClosing events.log')
-        sh.wrt.close()
+        if sh.logging is True:
+            print('\nClosing events.log')
+            sh.wrt.close()
         sys.exit(0)
     return tmp
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description = 'A way of monitoring and controlling the flow of packets and frames', prog = 'bouncer')
-    parser.add_argument('-b', help = 'baseline')
-    parser.add_argument('-f', help = 'filter')
-    parser.add_argument('-i', help = 'interface')
-    parser.add_argument('-r', help = 'reader')
+    parser.add_argument('-b', help = 'baseline quantity')
+    parser.add_argument('-f', help = 'BPF filter')
+    parser.add_argument('-i', help = 'interface to monitor')
+    parser.add_argument('-l', action = 'store_true', help = 'log to events.log')
+    parser.add_argument('-r', help = 'read an input log')
     args = parser.parse_args()
 
     ## read
@@ -172,4 +185,4 @@ if __name__ == '__main__':
         sh = Shared()
         signal_handler = crtlC(sh)
         signal.signal(signal.SIGINT, signal_handler)
-        bn = Bouncer(baseline = args.b, FILTER = args.f, interface = args.i, sh = sh)
+        bn = Bouncer(baseline = args.b, FILTER = args.f, interface = args.i, sh = sh, log = args.l)
